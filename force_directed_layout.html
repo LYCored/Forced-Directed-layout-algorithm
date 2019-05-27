@@ -1,0 +1,423 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Force Directed Layout</title>
+	<!--<link href="https://cdn.staticfile.org/twitter-bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet">-->
+	
+	<script type="text/javascript" src="https://cdn.staticfile.org/jquery/3.4.0/jquery.min.js"></script>
+	<!--<script type="text/javascript" src="https://cdn.staticfile.org/twitter-bootstrap/4.3.1/js/bootstrap.min.js"></script>-->
+	<script type="text/javascript" src="https://cdn.staticfile.org/d3/5.9.2/d3.min.js"></script>
+	
+	<!--四叉树-->
+	<script>
+		function Node(left, right, top, bottom, parent){
+			this.parent = parent || null
+			this.children = new Array(null, null, null, null)
+			this.left = (left >= 0) ? left : -1
+			this.right = (right >= 0) ? right : -1
+			this.top = (top >= 0) ? top : -1
+			this.bottom = (bottom >= 0) ? bottom : -1
+			this.exist_node = false
+			this.node_index = -1
+			this.weight = 0
+			this.force_x = 0
+			this.force_y = 0
+			this.belongToQuadrant = function(x, y){
+				let midX = (this.left + this.right) / 2
+				let midY = (this.top + this.bottom) / 2
+				if (x >= midX && x <= this.right && y >= this.top && y < midY){
+					return 1
+				}
+				else if (x >= this.left && x < midX && y >= this.top && y < midY){
+					return 2
+				}
+				else if (x >= this.left && x < midX && y >= midY && y <= this.bottom){
+					return 3
+				}
+				else if (x >= midX && x <= this.right && y >= midY && y <= this.bottom){
+					return 4
+				}
+			}
+		}
+		
+		function Quadtree(root){
+			this.root = root || new Node(0, width, 0, height, null)
+			
+			function generateChild(current, index){
+				let quadrant = current.belongToQuadrant(node[index].x, node[index].y)
+				if (current.children[quadrant - 1] == null){
+					let left = (quadrant == 2 || quadrant == 3) ? current.left : (current.left + current.right) / 2
+					let right = (quadrant == 1 || quadrant == 4) ? current.right : (current.left + current.right) / 2
+					let top = (quadrant == 1 || quadrant == 2) ? current.top : (current.top + current.bottom) / 2
+					let bottom = (quadrant == 3 || quadrant == 4) ? current.bottom : (current.top + current.bottom) / 2
+					current.children[quadrant - 1] = new Node(left, right, top, bottom, current)
+				}
+				/*let svg = d3.select('svg')
+				svg.append('line')
+					.attr('x1', (current.left + current.right) / 2)
+					.attr('y1', current.top)
+					.attr('x2', (current.left + current.right) / 2)
+					.attr('y2', current.bottom)
+					.attr('stroke', 'brown')
+					.attr('stroke-width', 1)
+					.attr('class', 'output')
+				svg.append('line')
+					.attr('x1', current.left)
+					.attr('y1', (current.top + current.bottom) / 2)
+					.attr('x2', current.right)
+					.attr('y2', (current.top + current.bottom) / 2)
+					.attr('stroke', 'brown')
+					.attr('stroke-width', 1)
+					.attr('class', 'output')*/
+				return quadrant
+			}
+			this.findPosition = function findPosition(current, index){
+				if (!current.exist_node){
+					current.exist_node = true
+					current.node_index = index
+				}
+				else {
+					let quadrant = generateChild(current, index)
+					//console.log(current)
+					findPosition(current.children[quadrant - 1], index)
+					
+					if (current.node_index != -1){
+						let existed = current.node_index
+						current.node_index = -1
+						quadrant = generateChild(current, existed)
+						//console.log(current)
+						findPosition(current.children[quadrant - 1], existed)
+					}
+				}
+				current.weight++
+			}
+			this.preOrder = function preOrder(current, sumX, sumY){
+				if (current.node_index != -1){
+					current.force_x += sumX
+					current.force_y += sumY
+					node[current.node_index].force_x += current.force_x
+					node[current.node_index].force_y += current.force_y
+				}
+				else {
+					for (let i = 0; i < 4; i++){
+						if (current.children[i] != null){
+							preOrder(current.children[i], current.force_x + sumX, current.force_y + sumY)
+						}
+					}
+				}
+			}
+			
+			this.output = function output(current){
+				if (current.node_index != -1){
+					return
+				}
+				else {
+					for (let i = 0; i < 4; i++){
+						let svg = d3.select('#canvas')
+						svg.append('line')
+							.attr('x1', (current.left + current.right) / 2)
+							.attr('y1', current.top)
+							.attr('x2', (current.left + current.right) / 2)
+							.attr('y2', current.bottom)
+							.attr('stroke', 'brown')
+							.attr('stroke-width', 1)
+							.attr('class', 'output')
+						svg.append('line')
+							.attr('x1', current.left)
+							.attr('y1', (current.top + current.bottom) / 2)
+							.attr('x2', current.right)
+							.attr('y2', (current.top + current.bottom) / 2)
+							.attr('stroke', 'brown')
+							.attr('stroke-width', 1)
+							.attr('class', 'output')
+						if (current.children[i] != null){
+							output(current.children[i])
+						}
+					}
+				}
+			}
+		}
+	</script>
+	
+	<!--力导向图算法-->
+	<script>
+		let width = 1000
+		let height = 1000
+		let V = 6 // 结点数量
+		let L = 20
+		let k_r = 90000
+		let k_s = 1.2
+		let delta_t = 0.01
+		let MAX_DISPLACEMENT_SQUARED = 10000
+		let iter = 10000
+		// 数据
+		/*let adjacency = [[0, 1, 0, 0, 0, 1],
+						 [1, 0, 1, 0, 0, 0],
+						 [0, 1, 0, 1, 0, 0],
+						 [0, 0, 1, 0, 1, 0],
+					 	 [0, 0, 0, 1, 0, 1],
+						 [1, 0, 0, 0, 1, 0]]*/
+		/*let node = [{name:'a', x:0, y:0, force_x:0, force_y:0},
+					{name:'b', x:0, y:0, force_x:0, force_y:0},
+					{name:'c', x:0, y:0, force_x:0, force_y:0},
+					{name:'d', x:0, y:0, force_x:0, force_y:0},
+					{name:'e', x:0, y:0, force_x:0, force_y:0},
+					{name:'f', x:0, y:0, force_x:0, force_y:0}]*/
+		let node = []
+		let theta = 0.5
+		
+		// 随机洒点
+		function sprinkleNodes(node){
+			for (let d of node){
+				d.x = Math.floor(Math.random() * 601 + 200) // 随机获取200~800之间的随机数
+				d.y = Math.floor(Math.random() * 601 + 200)
+			}
+		}
+		
+		/*function repulsiveForce(node){
+			for (let i = 0; i < node.length - 1; i++){
+				for (let j = i + 1; j < node.length; j++){
+					let dx = node[j].x - node[i].x
+					let dy = node[j].y - node[i].y
+					if (dx != 0 || dy != 0){
+						let distanceSquard = dx * dx + dy * dy
+						let distance = Math.round(Math.sqrt(distanceSquard))
+						let force = k_r / distanceSquard
+						let fx = force * dx / distance
+						let fy = force * dy / distance
+						node[i].force_x -= fx
+						node[i].force_y -= fy
+						node[j].force_x += fx
+						node[j].force_y += fy
+					}
+					else {
+						node[i].force_x -= 0.1
+						node[i].force_y -= 0.1
+						node[j].force_x += 0.1
+						node[j].force_y += 0.1
+					}
+				}
+			}
+		}*/
+		
+		function tractionForce(node, links){
+			/*for (let i = 0; i < node.length - 1; i++){
+				for (let j = i + 1; j < node.length; j++){
+					if (adjacency != 0){
+						let dx = node[j].x - node[i].x
+						let dy = node[j].y - node[i].y
+						if (dx != 0 || dy != 0){ 
+							let distance = Math.round(Math.sqrt(dx * dx + dy * dy))
+							let force = k_s * (distance - L)
+							let fx = force * dx / distance
+							let fy = force * dy / distance
+							node[i].force_x += fx
+							node[i].force_y += fy
+							node[j].force_x -= fx
+							node[j].force_y -= fy
+						}
+					}
+				}
+			}*/
+			for (let d of links){
+				let dx = node[d.endIndex].x - node[d.startIndex].x
+				let dy = node[d.endIndex].y - node[d.startIndex].y
+				if (dx != 0 || dy != 0){ 
+					let distance = Math.sqrt(dx * dx + dy * dy)
+					let force = k_s * (distance - L)
+					let fx = force * dx / distance
+					let fy = force * dy / distance
+					node[d.startIndex].force_x += fx
+					node[d.startIndex].force_y += fy
+					node[d.endIndex].force_x -= fx
+					node[d.endIndex].force_y -= fy
+				} 
+			}
+		}
+		
+		function updatePosition(node, quadtree){
+			quadtree.preOrder(quadtree.root, 0, 0)
+			for (let d of node){
+				let dx = d.force_x * delta_t
+				let dy = d.force_y * delta_t
+				d.force_x = 0
+				d.force_y = 0
+				let displacementSquared = dx * dx + dy * dy
+				if (displacementSquared > MAX_DISPLACEMENT_SQUARED){
+					let s = Math.sqrt(MAX_DISPLACEMENT_SQUARED / displacementSquared)
+					dx = dx * s
+					dy = dy * s
+				}
+				d.x += dx;
+				d.y += dy;
+				if (d.x < 0)
+					d.x = 0
+				else if (d.x > width)
+					d.x = width
+				if (d.y < 0)
+					d.y = 0
+				else if (d.y > height)
+					d.y = height
+			}
+			
+			/*for (let i = 0; i < V - 1; i++){
+				for (let j = 0; j < V; j++){
+					if ((node[i].x - node[j].x == 0) && (node[i].y - node[j].y == 0)){
+						node[i].x += 1
+						node[i].y += 1
+						node[j].x += 1
+						node[j].y += 1
+					}
+				}
+			}*/
+		}
+		
+		function repulsiveForceWithQuadtree(index, current){
+			let dx = (current.left + current.right) / 2 - node[index].x
+			let dy = (current.top + current.bottom) / 2 - node[index].y
+			let d = Math.sqrt(dx * dx + dy * dy)
+			if ((current.right - current.left) / d > theta){
+				for (let i = 0; i < 4; i++){
+					if (current.children[i] != null){
+						repulsiveForceWithQuadtree(index, current.children[i])
+					}
+				}
+			}
+			else{
+				if (dx != 0 || dy != 0){
+					let distanceSquard = dx * dx + dy * dy
+					let force = k_r / distanceSquard
+					let fx = force * dx / d
+					let fy = force * dy / d
+					current.force_x += fx
+					current.force_y += fy
+					//node[index].force_x -= current.weight * fx
+					node[index].force_x -= fx
+					//node[index].force_y -= current.weight * fy
+					node[index].force_y -= fy
+				}
+			}
+		}
+		
+		$(document).ready(function(){
+			d3.json("json/miserables.json").then(function(data){
+				node = data.nodes
+				V = data.nodes.length
+				for (let i = 0; i < V; i++){
+					node[i].x = 0
+					node[i].y = 0
+					node[i].force_x = 0
+					node[i].force_y = 0
+				}
+				sprinkleNodes(node)
+				
+				for (let i = 0; i < data.links.length; i++){
+					let sFlag = false
+					let eFlag = false
+					for (let j = 0; j < node.length; j++){
+						if (node[j].id == data.links[i].source){
+							data.links[i].startIndex = j
+							sFlag = true
+						}
+						else if (node[j].id == data.links[i].target){
+							data.links[i].endIndex = j
+						}
+						
+						if (sFlag && eFlag){
+							break;
+						}
+					}
+				}
+			
+				let svg = d3.select('#canvas')
+							.attr('width', width)
+							.attr('height', height)
+
+				let line = svg.selectAll('line')
+							.data(data.links)
+							.enter()
+							.append('line')
+							.attr('x1', function(d){return node[d.startIndex].x})
+							.attr('y1', function(d){return node[d.startIndex].y})
+							.attr('x2', function(d){return node[d.endIndex].x})
+							.attr('y2', function(d){return node[d.endIndex].y})
+							.attr('stroke', 'AntiqueWhite')
+							.attr('stroke-width', 2)
+
+				let circle = svg.selectAll('circle')
+								.data(node)
+								.enter()
+								.append('circle')
+								.attr('cx', function(d){return d.x})
+								.attr('cy', function(d){return d.y})
+								.attr('r', 5)
+								.attr('fill', function(d){
+									switch (d.group){
+										case 1:
+											return 'Gray'
+										case 2:
+											return 'Aqua'
+										case 3:
+											return 'Aquamarine'
+										case 4:
+											return 'BlueViolet'
+										case 5:
+											return 'Gold'
+										case 6:
+											return 'Chocolate'
+										case 7:
+											return 'Crimson'
+										case 8:
+											return 'DeepPink'
+										case 9:
+											return 'GreenYellow'
+										case 10:
+											return 'DimGray'
+										default:
+											return 'LightSalmon'
+									}
+								})
+
+				let mTree = new Quadtree(new Node(0, width, 0, height, null))
+				for (let i = 0; i < V; i++){
+					mTree.findPosition(mTree.root, i)
+				}
+
+				for (let i = 0; i < iter; i++){
+					for (let j = 0; j < V; j++){
+						repulsiveForceWithQuadtree(j, mTree.root)
+					}
+					tractionForce(node, data.links)
+					updatePosition(node, mTree)
+
+					mTree = new Quadtree(new Node(0, width, 0, height, null))
+					for (let i = 0; i < V; i++){
+						mTree.findPosition(mTree.root, i)
+					}
+					svg.selectAll('.output').remove()
+					//mTree.output(mTree.root)
+				}
+				circle.data(node)
+					.transition()
+					.duration(1000)
+					.ease(d3.easeLinear)
+					.attr('cx', function(d){return d.x})
+					.attr('cy', function(d){return d.y})
+
+				line.transition()
+					.duration(1000)
+					.ease(d3.easeLinear)
+					.attr('x1', function(d){return node[d.startIndex].x})
+					.attr('y1', function(d){return node[d.startIndex].y})
+					.attr('x2', function(d){return node[d.endIndex].x})
+					.attr('y2', function(d){return node[d.endIndex].y})
+			})
+		});
+	</script>
+</head>
+
+<body>
+	<svg id="canvas"></svg>
+</body>
+</html>
